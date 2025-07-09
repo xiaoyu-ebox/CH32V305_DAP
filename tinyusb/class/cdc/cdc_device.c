@@ -413,6 +413,9 @@ bool cdcd_control_xfer_cb(uint8_t rhport, uint8_t stage, const tusb_control_requ
         bool const rts = tu_bit_test(request->wValue, 1);
 
         p_cdc->line_state = (uint8_t) request->wValue;
+#if CFG_TUD_CDC_DISABLE_FLOWCONTROL
+        p_cdc->line_state |= 1; // DTR bit
+#endif
 
         // Disable fifo overwriting if DTR bit is set
         tu_fifo_set_overwritable(&p_cdc->tx_ff, !dtr);
