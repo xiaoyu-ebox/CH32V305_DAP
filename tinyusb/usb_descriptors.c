@@ -59,7 +59,7 @@ size_t board_get_unique_id(uint8_t id[], size_t max_len) {
 
 static uint8_t uid[16];
 static inline size_t board_usb_get_serial(uint16_t desc_str1[], size_t max_chars) {
-   TU_ATTR_ALIGNED(4);
+  //  TU_ATTR_ALIGNED(4);
   size_t uid_len;
 
   // TODO work with make, but not working with esp32s3 cmake

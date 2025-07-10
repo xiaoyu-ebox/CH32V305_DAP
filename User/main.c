@@ -267,7 +267,7 @@ void do_dap_message() {
         usbRcvIdx ++; led_delay_ms = 50;
         uint32_t offset = RxOffset - RxDataBuffer;
         recv_len = tud_vendor_read((void*)RxOffset, sizeof(RxDataBuffer) - offset);
-        dump_memory(RxOffset,recv_len,32);
+        dump_memory((uint8_t *)RxOffset,recv_len,32);
 
         RxOffset = RxDataBuffer;
         if(offset){//second Read !!
@@ -291,13 +291,21 @@ void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const* p_line_coding)
 }
 
 static  int  tinyusb_inited = false;
+static bool cdc_connected = false;
 void cdc_task(void) {
     if(1){
         if(!tinyusb_inited) {
             return;
         }
         // blackmagic_main(1,NULL);
-        tud_cdc_n_connected(0)?GPIO_SetBits(GPIOC, GPIO_Pin_11):GPIO_ResetBits(GPIOC, GPIO_Pin_11);//USB connected connected
+
+        bool cdc_status = tud_cdc_n_connected(0);
+        cdc_status ? GPIO_SetBits(GPIOC, GPIO_Pin_11):GPIO_ResetBits(GPIOC, GPIO_Pin_11);//USB connected connected
+        if(cdc_status != cdc_connected) {
+            cdc_connected = cdc_status;
+            printf("CDC %s\r\n",cdc_status ? "Connected" : "Disconnected");
+        }
+
         for(uint8_t i = 0;i<CFG_TUD_CDC;i++){
             if (tud_cdc_n_connected(i)) {
                 while (tud_cdc_n_available(i)) {
@@ -407,7 +415,7 @@ void tusb_task(void *pvParameters)
  *
  * @return  none
  */
-
+extern void board_init(void);
 int main(void)
 {
 
@@ -417,7 +425,7 @@ int main(void)
 	USART_Printf_Init(115200);
 	board_init();
     
-   VCOM_Init();
+    VCOM_Init();
 
 	printf("SystemClk:%d\r\n",SystemCoreClock);
 	printf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );

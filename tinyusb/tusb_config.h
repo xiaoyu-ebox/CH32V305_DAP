@@ -128,7 +128,7 @@
 // #define CFG_TUD_DFU_XFER_BUFSIZE  (TUD_OPT_HIGH_SPEED ? 512 : 64)
 
 // 关闭cdc流控
-#define CFG_TUD_CDC_DISABLE_FLOWCONTROL 0
+#define CFG_TUD_CDC_DISABLE_FLOWCONTROL 1
 
 #ifdef __cplusplus
  }
