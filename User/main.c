@@ -282,6 +282,14 @@ void do_dap_message() {
     }
 }
 #endif
+
+void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const* p_line_coding)
+{
+    printf("USB_CDC_LINE_CODING: %d,%d,%d,%d\r\n", p_line_coding->bit_rate, p_line_coding->stop_bits, p_line_coding->parity, p_line_coding->data_bits);
+
+    VCOM_SetLineCoding(p_line_coding);
+}
+
 static  int  tinyusb_inited = false;
 void cdc_task(void) {
     if(1){
@@ -304,7 +312,7 @@ void cdc_task(void) {
                         if(DMA_GetCurrDataCounter(DMA1_Channel2) == 0){
                             count = tud_cdc_n_read(i,buf, sizeof(buf));
                             if(count>0){
-                                USART3_Send_DMA(buf,count);
+                                VCOM_Send_DMA(buf,count);
                             }
                         }
                         continue;

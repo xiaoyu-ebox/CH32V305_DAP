@@ -2,6 +2,8 @@
 #define __VCOM_SERIAL_H__
 
 
+#include "class/cdc/cdc.h"
+
 #define RX_BUFF_SIZE    1024 	// RX buffer size
 #define TX_BUFF_SIZE    1024 	// RX buffer size
 
@@ -28,19 +30,9 @@ typedef struct {
 extern volatile VCOM Vcom;
 
 
-typedef struct __attribute__((packed)) {
-    uint32_t u32DTERate;     	// Baud rate
-    uint8_t  u8CharFormat;   	// stop bit:  0 - 1 Stop bit, 1 - 1.5 Stop bits, 2 - 2 Stop bits
-    uint8_t  u8ParityType;   	// parity:    0 - None, 1 - Odd, 2 - Even, 3 - Mark, 4 - Space
-    uint8_t  u8DataBits;     	// data bits: 5, 6, 7, 8, 16
-} VCOM_LINE_CODING;
-
-extern VCOM_LINE_CODING LineCfg;
-
-
 void VCOM_Init(void);
-void VCOM_TransferData(void);
-void VCOM_LineCoding(VCOM_LINE_CODING * LineCfgx);
-void USART3_Send_DMA(uint8_t *data, uint16_t len);
+void VCOM_SetLineCoding(cdc_line_coding_t const* p_line_coding);
+
+void VCOM_Send_DMA(uint8_t *data, uint16_t len);
 
 #endif // __VCOM_SERIAL_H__

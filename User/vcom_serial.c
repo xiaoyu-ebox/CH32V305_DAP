@@ -8,9 +8,6 @@
 #include "tusb.h"
 #include "message_buffer.h"
 
-volatile VCOM Vcom;
-
-VCOM_LINE_CODING LineCfg = {115200, 0, 0, 8};   // Baud rate, stop bits, parity bits, data bits
 
 #define RX_BUFF_SZ   256
 #define TX_BUFF_SZ   256
@@ -41,7 +38,7 @@ void USART3_IRQHandler(void) {
         if(received_len && cdc_rcv_queue){
             // 重置DMA（循环模式下自动覆盖旧数据）
             BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-            size_t xBytesSent = xMessageBufferSendFromISR( cdc_rcv_queue,
+            /*size_t xBytesSent = */xMessageBufferSendFromISR( cdc_rcv_queue,
                         ( void * ) RxBuffer,received_len,
                         &xHigherPriorityTaskWoken );
 
@@ -68,7 +65,7 @@ void DMA1_Channel3_IRQHandler(void) {
         // 处理接收完成的数据
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
         if(cdc_rcv_queue){
-            size_t xBytesSent = xMessageBufferSendFromISR( cdc_rcv_queue,
+            /*size_t xBytesSent = */xMessageBufferSendFromISR( cdc_rcv_queue,
                     ( void * ) RxBuffer,RXDMA_SZ,
                     &xHigherPriorityTaskWoken );
         }
@@ -137,7 +134,7 @@ void VCOM_Init(void)
     DMA_Cmd(uartRxDma, ENABLE);
 
 
-    USART_InitStructure.USART_BaudRate = LineCfg.u32DTERate;
+    USART_InitStructure.USART_BaudRate = 115200;
     USART_InitStructure.USART_WordLength = USART_WordLength_8b;
     USART_InitStructure.USART_StopBits = USART_StopBits_1;
     USART_InitStructure.USART_Parity = USART_Parity_No;
@@ -172,9 +169,47 @@ void VCOM_Init(void)
 
 }
 
+void VCOM_SetLineCoding(cdc_line_coding_t const* p_line_coding)
+{
+    USART_InitTypeDef USART_InitStructure;
+    
+    switch(p_line_coding->data_bits)
+    {
+    case 8:  USART_InitStructure.USART_WordLength = USART_WordLength_8b; break;
+    default: USART_InitStructure.USART_WordLength = USART_WordLength_8b; break;
+    }
+    
+    switch(p_line_coding->parity)
+    {
+    case 0:  USART_InitStructure.USART_Parity     = USART_Parity_No;     break;
+    case 1:  USART_InitStructure.USART_Parity     = USART_Parity_Odd;
+             USART_InitStructure.USART_WordLength = USART_WordLength_9b; break;
+    case 2:  USART_InitStructure.USART_Parity     = USART_Parity_Even;
+             USART_InitStructure.USART_WordLength = USART_WordLength_9b; break;
+    default: USART_InitStructure.USART_Parity     = USART_Parity_No;     break;
+    }
 
+    switch(p_line_coding->stop_bits)
+    {
+    case 0:  USART_InitStructure.USART_StopBits = USART_StopBits_1;   break;
+    case 1:  USART_InitStructure.USART_StopBits = USART_StopBits_1_5; break;
+    case 2:  USART_InitStructure.USART_StopBits = USART_StopBits_2;   break;
+    default: USART_InitStructure.USART_StopBits = USART_StopBits_1;   break;
+    }
 
-void USART3_Send_DMA(uint8_t *data, uint16_t len) {
+    USART_InitStructure.USART_BaudRate = p_line_coding->bit_rate;
+    USART_InitStructure.USART_Mode = USART_Mode_Tx | USART_Mode_Rx;
+    USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
+
+    __disable_irq();
+    
+    USART_Init(USART3, &USART_InitStructure);
+
+    __enable_irq();
+}
+
+void VCOM_Send_DMA(uint8_t *data, uint16_t len)
+{
     DMA_Cmd(uartTxDma, DISABLE);               // 关闭DMA
     if(len > TX_BUFF_SZ) len = TX_BUFF_SZ;
     memcpy(TxBuffer,data,len);
