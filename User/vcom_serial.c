@@ -24,7 +24,7 @@ DMA_Channel_TypeDef * uartTxDma   = DMA1_Channel2;
 DMA_Channel_TypeDef * uartRxDma   = DMA1_Channel3;
 
 extern MessageBufferHandle_t cdc_rcv_queue ;
-
+extern void usbd_defer_func(osal_task_func_t func, void* param, bool in_isr);
 
 void USART3_IRQHandler(void)        __attribute__((interrupt("WCH-Interrupt-fast")));
 void DMA1_Channel2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
@@ -44,6 +44,9 @@ void USART3_IRQHandler(void) {
             size_t xBytesSent = xMessageBufferSendFromISR( cdc_rcv_queue,
                         ( void * ) RxBuffer,received_len,
                         &xHigherPriorityTaskWoken );
+
+            // 触发usb任务立即跑cdc_task
+            usbd_defer_func(NULL, NULL, true);
         }
         // 重置DMA（循环模式下自动覆盖旧数据）
         DMA_Cmd(uartRxDma, DISABLE);
