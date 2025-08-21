@@ -11,7 +11,7 @@ MEMORY
    CH32V30x_D8 - CH32V303CB-CH32V303RB
 */
 /**/
-	FLASH (rx) : ORIGIN     = 8k, LENGTH = 128K-9K
+	FLASH (rx) : ORIGIN     = 0, LENGTH = 128K
 	RAM (xrw) : ORIGIN      = 0x20000000, LENGTH = 32K
 
     

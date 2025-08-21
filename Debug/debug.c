@@ -185,11 +185,13 @@ void SDI_Printf_Enable(void)
 __attribute__((used)) int _write(int fd, char *buf, int size)
 {
     int i = 0;
+#if 0
     if (ENABLE_PRINTF&&tud_cdc_connected()) {
         tud_cdc_write(buf,size);
         tud_cdc_write_flush();
         return size;
     }
+#endif
 
 #if (SDI_PRINT == SDI_PR_OPEN)
     int writeSize = size;
