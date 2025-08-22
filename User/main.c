@@ -20,6 +20,7 @@
 #include "task.h"
 #include "timers.h"
 #include "tusb.h"
+#include "device/usbd_pvt.h"
 #include "vcom_serial.h"
 #include "DAP.h"
 #include "message_buffer.h"
@@ -296,86 +297,83 @@ void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const *p_line_coding)
     VCOM_SetLineCoding(p_line_coding);
 }
 
-static int tinyusb_inited = false;
 static bool cdc_connected = false;
-void cdc_task(void)
+void cdc_task_task_func(void *param)
 {
-    if (1)
+    bool cdc_status = tud_cdc_n_connected(0);
+    cdc_status ? GPIO_SetBits(GPIOC, GPIO_Pin_11) : GPIO_ResetBits(GPIOC, GPIO_Pin_11); // USB connected connected
+    if (cdc_status != cdc_connected)
     {
-        if (!tinyusb_inited)
-        {
-            return;
-        }
-        // blackmagic_main(1,NULL);
+        cdc_connected = cdc_status;
+        printf("CDC %s\r\n", cdc_status ? "Connected" : "Disconnected");
+    }
 
-        bool cdc_status = tud_cdc_n_connected(0);
-        cdc_status ? GPIO_SetBits(GPIOC, GPIO_Pin_11) : GPIO_ResetBits(GPIOC, GPIO_Pin_11); // USB connected connected
-        if (cdc_status != cdc_connected)
+    for (uint8_t i = 0; i < CFG_TUD_CDC; i++)
+    {
+        if (tud_cdc_n_connected(i))
         {
-            cdc_connected = cdc_status;
-            printf("CDC %s\r\n", cdc_status ? "Connected" : "Disconnected");
-        }
-
-        for (uint8_t i = 0; i < CFG_TUD_CDC; i++)
-        {
-            if (tud_cdc_n_connected(i))
+            while (tud_cdc_n_available(i))
             {
-                while (tud_cdc_n_available(i))
+                uint16_t bits = GPIO_ReadOutputData(GPIOC);
+                (bits & 1 << 10) ? GPIO_ResetBits(GPIOC, GPIO_Pin_10) : GPIO_SetBits(GPIOC, GPIO_Pin_10); // data active
+                led_delay_ms = 100;
+
+                uint8_t buf[64];
+                uint32_t count = 0;
+                if (i == 0)
                 {
-
-                    uint16_t bits = GPIO_ReadOutputData(GPIOC);
-                    (bits & 1 << 10) ? GPIO_ResetBits(GPIOC, GPIO_Pin_10) : GPIO_SetBits(GPIOC, GPIO_Pin_10); // data active
-                    led_delay_ms = 100;
-
-                    uint8_t buf[64];
-                    uint32_t count = 0;
-                    if (i == 0)
+                    if (DMA_GetCurrDataCounter(DMA1_Channel2) == 0)
                     {
-                        if (DMA_GetCurrDataCounter(DMA1_Channel2) == 0)
+                        count = tud_cdc_n_read(i, buf, sizeof(buf));
+                        if (count > 0)
                         {
-                            count = tud_cdc_n_read(i, buf, sizeof(buf));
-                            if (count > 0)
-                            {
-                                VCOM_Send_DMA(buf, count);
-                            }
+                            VCOM_Send_DMA(buf, count);
                         }
-                        continue;
                     }
-                    count = tud_cdc_n_read(i, buf, sizeof(buf));
-                    if (count > 0)
-                    {
-                        tud_cdc_n_write(i, (const void *)buf, count);
-                        tud_cdc_n_write_flush(i);
-                    }
-                    // echo back to both web serial and cdc
+                    continue;
                 }
+
+                count = tud_cdc_n_read(i, buf, sizeof(buf));
+                if (count > 0)
+                {
+                    tud_cdc_n_write(i, (const void *)buf, count);
+                    tud_cdc_n_write_flush(i);
+                }
+                // echo back to both web serial and cdc
             }
         }
+    }
 
-        /***************************************************************/
-        uint8_t ucRxData[256];
-        size_t xReceivedBytes = 0;
-        while (!xMessageBufferIsEmpty(cdc_rcv_queue))
+    /***************************************************************/
+    uint8_t ucRxData[256];
+    size_t xReceivedBytes = 0;
+    while (!xMessageBufferIsEmpty(cdc_rcv_queue))
+    {
+
+        xReceivedBytes = xMessageBufferReceive(cdc_rcv_queue,
+                                               (void *)ucRxData,
+                                               sizeof(ucRxData),
+                                               pdMS_TO_TICKS(1));
+        if (xReceivedBytes > 0)
         {
-
-            xReceivedBytes = xMessageBufferReceive(cdc_rcv_queue,
-                                                   (void *)ucRxData,
-                                                   sizeof(ucRxData),
-                                                   pdMS_TO_TICKS(1));
-            if (xReceivedBytes > 0)
+            uint8_t port = 0;
+            if (tud_cdc_n_connected(port))
             {
-                uint8_t port = 0;
-                if (tud_cdc_n_connected(port))
-                {
-                    tud_cdc_n_write(port, (const void *)ucRxData, xReceivedBytes);
-                    tud_cdc_n_write_flush(port);
-                }
+                tud_cdc_n_write(port, (const void *)ucRxData, xReceivedBytes);
+                tud_cdc_n_write_flush(port);
             }
-        };
-        /***************************************************************/
-        // for(uint8_t i = 0;i<CFG_TUD_CDC;i++){
-        //     if (tud_cdc_n_connected(i))  tud_cdc_n_write_flush(i);
-        // }
+        }
+    };
+}
+
+void vcom_recv_data(uint8_t *data, uint16_t len)
+{
+    if (cdc_rcv_queue)
+    {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        /*size_t xBytesSent = */ xMessageBufferSendFromISR(cdc_rcv_queue, (void *)data, len, &xHigherPriorityTaskWoken);
+
+        usbd_defer_func(cdc_task_task_func, NULL, true);
     }
 }
 
@@ -411,7 +409,7 @@ void tusb_task(void *pvParameters)
 
     tusb_rhport_init_t dev_init = {.role = TUSB_ROLE_DEVICE, .speed = TUSB_SPEED_AUTO};
     tusb_init(BOARD_TUD_RHPORT, &dev_init);
-    tinyusb_inited = true;
+
     cdc_rcv_queue = xMessageBufferCreate(1024 * 1);
 #if OPT_CMSIS_DAPV2
     xClearBufTimer = xTimerCreate("CLK_DAP", pdMS_TO_TICKS(1000 * 10), pdTRUE, (void *)0, dapBuf_ClearTimer);
@@ -419,7 +417,6 @@ void tusb_task(void *pvParameters)
     while (1)
     {
         tud_task();
-        cdc_task();
 #if OPT_CMSIS_DAPV2
         do_dap_message();
 #endif

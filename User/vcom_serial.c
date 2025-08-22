@@ -18,9 +18,7 @@ uint8_t TxBuffer[TX_BUFF_SZ] __attribute__((aligned(4)));
 DMA_Channel_TypeDef *uartTxDma = DMA1_Channel2;
 DMA_Channel_TypeDef *uartRxDma = DMA1_Channel3;
 
-extern MessageBufferHandle_t cdc_rcv_queue;
-extern void usbd_defer_func(osal_task_func_t func, void *param, bool in_isr);
-
+extern void vcom_recv_data(uint8_t *data, uint16_t len);
 void USART3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void DMA1_Channel2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
@@ -34,18 +32,11 @@ void USART3_IRQHandler(void)
         // 计算已接收数据长度
         uint16_t remain_cnt = DMA_GetCurrDataCounter(uartRxDma); // 剩余未传输的数据量
         uint16_t received_len = RXDMA_SZ - remain_cnt;           // 已接收的数据长度
-
-        if (received_len && cdc_rcv_queue)
+        if (received_len)
         {
-            // 重置DMA（循环模式下自动覆盖旧数据）
-            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-            /*size_t xBytesSent = */ xMessageBufferSendFromISR(cdc_rcv_queue,
-                                                               (void *)RxBuffer, received_len,
-                                                               &xHigherPriorityTaskWoken);
-
-            // 触发usb任务立即跑cdc_task
-            usbd_defer_func(NULL, NULL, true);
+            vcom_recv_data(RxBuffer, received_len);
         }
+
         // 重置DMA（循环模式下自动覆盖旧数据）
         DMA_Cmd(uartRxDma, DISABLE);
         DMA_SetCurrDataCounter(uartRxDma, RXDMA_SZ);
@@ -67,14 +58,10 @@ void DMA1_Channel3_IRQHandler(void)
     if (DMA_GetITStatus(DMA1_IT_TC3))
     {
         DMA_ClearITPendingBit(DMA1_IT_TC3);
+
         // 处理接收完成的数据
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        if (cdc_rcv_queue)
-        {
-            /*size_t xBytesSent = */ xMessageBufferSendFromISR(cdc_rcv_queue,
-                                                               (void *)RxBuffer, RXDMA_SZ,
-                                                               &xHigherPriorityTaskWoken);
-        }
+        vcom_recv_data(RxBuffer, RXDMA_SZ);
+
         // 重置DMA（循环模式下自动覆盖旧数据）
         DMA_Cmd(uartRxDma, DISABLE);
         DMA_SetCurrDataCounter(uartRxDma, RXDMA_SZ);
@@ -229,6 +216,7 @@ void VCOM_Send_DMA(uint8_t *data, uint16_t len)
     DMA_Cmd(uartTxDma, DISABLE); // 关闭DMA
     if (len > TX_BUFF_SZ)
         len = TX_BUFF_SZ;
+
     memcpy(TxBuffer, data, len);
     DMA_SetCurrDataCounter(uartTxDma, len); // 设置传输长度
     DMA_Cmd(uartTxDma, ENABLE);             // 启动DMA
