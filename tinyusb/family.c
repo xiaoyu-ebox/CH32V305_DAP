@@ -45,30 +45,32 @@
 #pragma GCC diagnostic pop
 #endif
 
-
 //--------------------------------------------------------------------+
 // Forward USB interrupt events to TinyUSB IRQ Handler
 //--------------------------------------------------------------------+
 
 // TODO maybe having FS as port0, HS as port1
 
-__attribute__((interrupt)) void USBHS_IRQHandler(void) {
-  #if CFG_TUD_WCH_USBIP_USBHS
+__attribute__((interrupt)) void USBHS_IRQHandler(void)
+{
+#if CFG_TUD_WCH_USBIP_USBHS
   tud_int_handler(0);
-  #endif
+#endif
 }
 
-__attribute__((interrupt)) void OTG_FS_IRQHandler(void) {
-  #if CFG_TUD_WCH_USBIP_USBFS
+__attribute__((interrupt)) void OTG_FS_IRQHandler(void)
+{
+#if CFG_TUD_WCH_USBIP_USBFS
   tud_int_handler(0);
-  #endif
+#endif
 }
 
 //--------------------------------------------------------------------+
 // MACRO TYPEDEF CONSTANT ENUM
 //--------------------------------------------------------------------+
 
-uint32_t SysTick_Config_ex(uint32_t ticks) {
+uint32_t SysTick_Config_ex(uint32_t ticks)
+{
   NVIC_EnableIRQ(SysTicK_IRQn);
   SysTick->CTLR = 0;
   SysTick->SR = 0;
@@ -78,7 +80,8 @@ uint32_t SysTick_Config_ex(uint32_t ticks) {
   return 0;
 }
 
-void board_init(void) {
+void board_init(void)
+{
 
   /* Disable interrupts during init */
   __disable_irq();
@@ -100,41 +103,49 @@ void board_init(void) {
 #endif
 
   // Fullspeed USB
-  uint8_t otg_div=0;
-  switch (SystemCoreClock) {
-    case 48000000:  otg_div = RCC_OTGFSCLKSource_PLLCLK_Div1; break;
-    case 96000000:  otg_div = RCC_OTGFSCLKSource_PLLCLK_Div2; break;
-    case 144000000: otg_div = RCC_OTGFSCLKSource_PLLCLK_Div3; break;
-    default:  break;
+  uint8_t otg_div = 0;
+  switch (SystemCoreClock)
+  {
+  case 48000000:
+    otg_div = RCC_OTGFSCLKSource_PLLCLK_Div1;
+    break;
+  case 96000000:
+    otg_div = RCC_OTGFSCLKSource_PLLCLK_Div2;
+    break;
+  case 144000000:
+    otg_div = RCC_OTGFSCLKSource_PLLCLK_Div3;
+    break;
+  default:
+    break;
   }
   RCC_OTGFSCLKConfig(otg_div);
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_OTG_FS, ENABLE);
 
   // GPIO_InitTypeDef GPIO_InitStructure = {0};
 
-
   /* Enable interrupts globally */
   __enable_irq();
 
-  for (int i=0;i<14000000/2;i++);
+  for (int i = 0; i < 14000000 / 2; i++)
+    ;
   // board_delay(2);
 }
 
 #if CFG_TUSB_OS && CFG_TUSB_OS == OPT_OS_NONE
 volatile uint32_t system_ticks = 0;
 
-__attribute__((interrupt)) void SysTick_Handler(void) {
+__attribute__((interrupt)) void SysTick_Handler(void)
+{
   SysTick->SR = 0;
   system_ticks++;
 }
 
-uint32_t board_millis(void) {
+uint32_t board_millis(void)
+{
   return system_ticks;
 }
 
 #endif
-
-
 
 #ifdef USE_FULL_ASSERT
 /**
@@ -144,7 +155,8 @@ uint32_t board_millis(void) {
  * @param  line: assert_param error line source number
  * @retval None
  */
-void assert_failed(char* file, uint32_t line) {
+void assert_failed(char *file, uint32_t line)
+{
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line
      number,
