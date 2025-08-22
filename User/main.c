@@ -32,6 +32,7 @@
 
 /* Global Variable */
 TaskHandle_t LED_Task_Handler;
+TaskHandle_t STATE_Task_Handler;
 TaskHandle_t USBTask_Handler;
 MessageBufferHandle_t cdc_rcv_queue = NULL;
 
@@ -366,12 +367,18 @@ void cdc_task_task_func(void *param)
     };
 }
 
+uint32_t recv_bytes = 0;
+uint32_t buf_full_times = 0;
 void vcom_recv_data(uint8_t *data, uint16_t len)
 {
+    recv_bytes += len;
     if (cdc_rcv_queue)
     {
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        /*size_t xBytesSent = */ xMessageBufferSendFromISR(cdc_rcv_queue, (void *)data, len, &xHigherPriorityTaskWoken);
+        size_t xBytesSent =  xMessageBufferSendFromISR(cdc_rcv_queue, (void *)data, len, &xHigherPriorityTaskWoken);
+        if(xBytesSent != len) {
+            ++buf_full_times;
+        }
 
         usbd_defer_func(cdc_task_task_func, NULL, true);
     }
@@ -401,6 +408,16 @@ void led_task(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS((led_delay_ms > max_delay) ? max_delay : led_delay_ms));
         GPIO_ResetBits(GPIOC, GPIO_Pin_9);
         vTaskDelay(pdMS_TO_TICKS((led_delay_ms > max_delay) ? max_delay : led_delay_ms));
+    }
+}
+
+void state_task(void *pvParameters)
+{
+    while (1)
+    {
+        printf("recv_bytes:%6u - %u\n", recv_bytes, buf_full_times);
+
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
 
@@ -462,6 +479,13 @@ int main(void)
                 (void *)NULL,
                 (UBaseType_t)LED_TASK_PRIO,
                 (TaskHandle_t *)&LED_Task_Handler);
+
+    xTaskCreate((TaskFunction_t)state_task,
+                (const char *)"state",
+                (uint16_t)LED_STK_SIZE,
+                (void *)NULL,
+                (UBaseType_t)LED_TASK_PRIO,
+                (TaskHandle_t *)&STATE_Task_Handler);
 
     vTaskStartScheduler();
 
