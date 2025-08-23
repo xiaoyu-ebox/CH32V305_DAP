@@ -322,6 +322,7 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 }
 
 // cdc => uart
+// 发送
 void cdc_2_uart_func(void *param)
 {
     uint8_t ucRxData[TX_BUFF_SZ];
@@ -347,6 +348,7 @@ void cdc_2_uart_func(void *param)
     }
 }
 
+// 接收
 void tud_cdc_rx_cb(uint8_t itf)
 {
     uint32_t len = 0;
@@ -365,6 +367,7 @@ void tud_cdc_rx_cb(uint8_t itf)
 }
 
 // uart => cdc
+// 发送
 void uart_2_cdc_func(void *param)
 {
     if (tud_cdc_connected())
@@ -385,6 +388,7 @@ void uart_2_cdc_func(void *param)
     }
 }
 
+// 接收
 void vcom_uart_rx_cb(uint8_t *data, uint16_t len)
 {
     if (uart_2_cdc_queue)

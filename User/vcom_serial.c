@@ -18,24 +18,31 @@ void USART3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void DMA1_Channel2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 
+uint8_t tempBuf[sizeof(RxBuffer)];
 void USART3_IRQHandler(void)
 {
     if (USART_GetITStatus(USART3, USART_IT_IDLE) != RESET)
     {
         USART_ReceiveData(USART3); // 清除空闲中断标志（关键！）
 
-        // 计算已接收数据长度
-        uint16_t remain_cnt = DMA_GetCurrDataCounter(uartRxDma); // 剩余未传输的数据量
-        uint16_t received_len = sizeof(RxBuffer) - remain_cnt;           // 已接收的数据长度
-        if (received_len)
-        {
-            vcom_uart_rx_cb(RxBuffer, received_len);
-        }
-
         // 重置DMA（循环模式下自动覆盖旧数据）
         DMA_Cmd(uartRxDma, DISABLE);
+
+        // 计算已接收数据长度
+        uint16_t remain_cnt = DMA_GetCurrDataCounter(uartRxDma); // 剩余未传输的数据量
+        uint16_t received_len = sizeof(RxBuffer) - remain_cnt;   // 已接收的数据长度
+        if (received_len)
+        {
+            memcpy(tempBuf, RxBuffer, sizeof(RxBuffer));
+        }
+
         DMA_SetCurrDataCounter(uartRxDma, sizeof(RxBuffer));
         DMA_Cmd(uartRxDma, ENABLE);
+
+        if (received_len)
+        {
+            vcom_uart_rx_cb(tempBuf, received_len);
+        }        
     }
 }
 
@@ -44,15 +51,18 @@ void DMA1_Channel3_IRQHandler(void)
 {
     if (DMA_GetITStatus(DMA1_IT_TC3))
     {
-        DMA_ClearITPendingBit(DMA1_IT_TC3);
+        DMA_Cmd(uartRxDma, DISABLE);
 
         // 处理接收完成的数据
-        vcom_uart_rx_cb(RxBuffer, sizeof(RxBuffer));
+        memcpy(tempBuf, RxBuffer, sizeof(RxBuffer));
 
         // 重置DMA（循环模式下自动覆盖旧数据）
-        DMA_Cmd(uartRxDma, DISABLE);
         DMA_SetCurrDataCounter(uartRxDma, sizeof(RxBuffer));
         DMA_Cmd(uartRxDma, ENABLE);
+
+        DMA_ClearITPendingBit(DMA1_IT_TC3);
+
+        vcom_uart_rx_cb(tempBuf, sizeof(tempBuf));
     }
 }
 
