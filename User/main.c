@@ -33,8 +33,13 @@
 /* Global Variable */
 TaskHandle_t LED_Task_Handler;
 TaskHandle_t STATE_Task_Handler;
-TaskHandle_t USBTask_Handler;
-MessageBufferHandle_t cdc_rcv_queue = NULL;
+TaskHandle_t USB_Task_Handler;
+
+TimerHandle_t xClearBufTimer;
+TimerHandle_t xStateTimer;
+
+MessageBufferHandle_t uart_2_cdc_queue = NULL;
+MessageBufferHandle_t cdc_2_uart_queue = NULL;
 
 static uint32_t led_delay_ms = 500;
 
@@ -258,7 +263,6 @@ void handle_dap_message(const uint8_t *pbuffer, uint32_t buff_size, uint32_t usb
     } while (buff_size > handled_len);
 }
 
-TimerHandle_t xClearBufTimer;
 void dapBuf_ClearTimer(TimerHandle_t xTimer)
 {
     RxOffset = RxDataBuffer;
@@ -291,97 +295,116 @@ void do_dap_message()
 }
 #endif
 
+uint32_t c2u_recv_bytes = 0;
+uint32_t c2u_send_bytes = 0;
+uint32_t c2u_drop_bytes = 0;
+uint32_t u2c_recv_bytes = 0;
+uint32_t u2c_send_bytes = 0;
+uint32_t u2c_drop_bytes = 0;
+
 void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const *p_line_coding)
 {
-    printf("USB_CDC_LINE_CODING: %d,%d,%d,%d\r\n", p_line_coding->bit_rate, p_line_coding->stop_bits, p_line_coding->parity, p_line_coding->data_bits);
+    printf("USB_CDC_LINE_CODING: %d,%d,%d,%d\n", p_line_coding->bit_rate, p_line_coding->stop_bits, p_line_coding->parity, p_line_coding->data_bits);
 
     VCOM_SetLineCoding(p_line_coding);
+
+    c2u_recv_bytes = 0;
+    c2u_send_bytes = 0;
+    c2u_drop_bytes = 0;
+    u2c_recv_bytes = 0;
+    u2c_send_bytes = 0;
+    u2c_drop_bytes = 0;
 }
 
-static bool cdc_connected = false;
-void cdc_task_task_func(void *param)
+void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 {
-    bool cdc_status = tud_cdc_n_connected(0);
-    cdc_status ? GPIO_SetBits(GPIOC, GPIO_Pin_11) : GPIO_ResetBits(GPIOC, GPIO_Pin_11); // USB connected connected
-    if (cdc_status != cdc_connected)
+    printf("USB_CDC_LINE_STATE: %d,%d, %u-%u\n", dtr, rts, tud_cdc_ready(), tud_cdc_connected());
+}
+
+// cdc => uart
+void cdc_2_uart_func(void *param)
+{
+    uint8_t ucRxData[TX_BUFF_SZ];
+
+    while (1)
     {
-        cdc_connected = cdc_status;
-        printf("CDC %s\r\n", cdc_status ? "Connected" : "Disconnected");
-    }
-
-    for (uint8_t i = 0; i < CFG_TUD_CDC; i++)
-    {
-        if (tud_cdc_n_connected(i))
-        {
-            while (tud_cdc_n_available(i))
-            {
-                uint16_t bits = GPIO_ReadOutputData(GPIOC);
-                (bits & 1 << 10) ? GPIO_ResetBits(GPIOC, GPIO_Pin_10) : GPIO_SetBits(GPIOC, GPIO_Pin_10); // data active
-                led_delay_ms = 100;
-
-                uint8_t buf[64];
-                uint32_t count = 0;
-                if (i == 0)
-                {
-                    if (DMA_GetCurrDataCounter(DMA1_Channel2) == 0)
-                    {
-                        count = tud_cdc_n_read(i, buf, sizeof(buf));
-                        if (count > 0)
-                        {
-                            VCOM_Send_DMA(buf, count);
-                        }
-                    }
-                    continue;
-                }
-
-                count = tud_cdc_n_read(i, buf, sizeof(buf));
-                if (count > 0)
-                {
-                    tud_cdc_n_write(i, (const void *)buf, count);
-                    tud_cdc_n_write_flush(i);
-                }
-                // echo back to both web serial and cdc
-            }
-        }
-    }
-
-    /***************************************************************/
-    uint8_t ucRxData[256];
-    size_t xReceivedBytes = 0;
-    while (!xMessageBufferIsEmpty(cdc_rcv_queue))
-    {
-
-        xReceivedBytes = xMessageBufferReceive(cdc_rcv_queue,
-                                               (void *)ucRxData,
-                                               sizeof(ucRxData),
-                                               pdMS_TO_TICKS(1));
+        size_t xReceivedBytes = xMessageBufferReceive(cdc_2_uart_queue, (void *)ucRxData, sizeof(ucRxData), portMAX_DELAY);
         if (xReceivedBytes > 0)
         {
-            uint8_t port = 0;
-            if (tud_cdc_n_connected(port))
-            {
-                tud_cdc_n_write(port, (const void *)ucRxData, xReceivedBytes);
-                tud_cdc_n_write_flush(port);
-            }
+            // for (uint32_t i = 0; i < 1500; ++i)
+            // {
+            //     if (DMA_GetCurrDataCounter(DMA1_Channel2) == 0)
+            //     {
+            //         break;
+            //     }
+
+            //     vTaskDelay(pdMS_TO_TICKS(2));
+            // }
+            VCOM_Send_DMA(ucRxData, xReceivedBytes);
+
+            c2u_send_bytes += xReceivedBytes;
         }
-    };
+    }
 }
 
-uint32_t recv_bytes = 0;
-uint32_t buf_full_times = 0;
-void vcom_recv_data(uint8_t *data, uint16_t len)
+void tud_cdc_rx_cb(uint8_t itf)
 {
-    recv_bytes += len;
-    if (cdc_rcv_queue)
+    uint32_t len = 0;
+    uint8_t data[256];
+
+    while ((len = tud_cdc_read(data, sizeof(data))) > 0)
+    {
+        size_t xBytesSent = xMessageBufferSend(cdc_2_uart_queue, (void *)data, len, 0);
+        c2u_recv_bytes += xBytesSent;
+
+        if (xBytesSent != len)
+        {
+            c2u_drop_bytes += (len - xBytesSent);
+        }
+    }
+}
+
+// uart => cdc
+void uart_2_cdc_func(void *param)
+{
+    if (tud_cdc_connected())
+    {
+        uint8_t ucRxData[256];
+        size_t xReceivedBytes = xMessageBufferReceive(uart_2_cdc_queue, (void *)ucRxData, sizeof(ucRxData), 0);
+        if (xReceivedBytes > 0)
+        {
+            int wr = tud_cdc_write((const void *)ucRxData, xReceivedBytes);
+            if (wr != xReceivedBytes)
+            {
+                printf("u2c w drop %u - %u\n", xReceivedBytes, wr);
+            }
+            tud_cdc_write_flush();
+
+            u2c_send_bytes += wr;
+        }
+    }
+}
+
+void vcom_uart_rx_cb(uint8_t *data, uint16_t len)
+{
+    if (uart_2_cdc_queue)
     {
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        size_t xBytesSent =  xMessageBufferSendFromISR(cdc_rcv_queue, (void *)data, len, &xHigherPriorityTaskWoken);
-        if(xBytesSent != len) {
-            ++buf_full_times;
+        size_t xBytesSent = xMessageBufferSendFromISR(uart_2_cdc_queue, (void *)data, len, &xHigherPriorityTaskWoken);
+        u2c_recv_bytes += xBytesSent;
+
+        if (xBytesSent != len)
+        {
+            u2c_drop_bytes += (len - xBytesSent);
         }
 
-        usbd_defer_func(cdc_task_task_func, NULL, true);
+        usbd_defer_func(uart_2_cdc_func, NULL, true);
     }
+}
+
+void stateTimerHandle(TimerHandle_t xTimer)
+{
+    printf("c2u:%6u - %6u - %6u, u2c:%6u - %6u - %6u\n", c2u_recv_bytes, c2u_send_bytes, c2u_drop_bytes, u2c_recv_bytes, u2c_send_bytes, u2c_drop_bytes);
 }
 
 /*********************************************************************
@@ -411,26 +434,28 @@ void led_task(void *pvParameters)
     }
 }
 
-void state_task(void *pvParameters)
-{
-    while (1)
-    {
-        printf("recv_bytes:%6u - %u\n", recv_bytes, buf_full_times);
-
-        vTaskDelay(pdMS_TO_TICKS(2000));
-    }
-}
-
 void tusb_task(void *pvParameters)
 {
-
-    tusb_rhport_init_t dev_init = {.role = TUSB_ROLE_DEVICE, .speed = TUSB_SPEED_AUTO};
+    tusb_rhport_init_t dev_init = {.role = TUSB_ROLE_DEVICE, .speed = TUSB_SPEED_HIGH};
     tusb_init(BOARD_TUD_RHPORT, &dev_init);
 
-    cdc_rcv_queue = xMessageBufferCreate(1024 * 1);
+    uart_2_cdc_queue = xMessageBufferCreate(1024 * 1);
+    cdc_2_uart_queue = xMessageBufferCreate(1024 * 1);
+
 #if OPT_CMSIS_DAPV2
     xClearBufTimer = xTimerCreate("CLK_DAP", pdMS_TO_TICKS(1000 * 10), pdTRUE, (void *)0, dapBuf_ClearTimer);
 #endif
+
+    xStateTimer = xTimerCreate("STATE", pdMS_TO_TICKS(2000), pdTRUE, (void *)1, stateTimerHandle);
+    xTimerStart(xStateTimer, 0);
+
+    xTaskCreate((TaskFunction_t)cdc_2_uart_func,
+                (const char *)"c2u",
+                (uint16_t)512,
+                (void *)NULL,
+                (UBaseType_t)LED_TASK_PRIO,
+                (TaskHandle_t *)&STATE_Task_Handler);
+
     while (1)
     {
         tud_task();
@@ -450,7 +475,6 @@ void tusb_task(void *pvParameters)
 extern void board_init(void);
 int main(void)
 {
-
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
     SystemCoreClockUpdate();
     Delay_Init();
@@ -465,27 +489,23 @@ int main(void)
 
     GPIO_Toggle_INIT();
 
+    // 防止复位太快，上位机未检测到usb拔出了，导致不会再次设置串口
+    Delay_Ms(1000);
+
     /* create two task */
     xTaskCreate((TaskFunction_t)tusb_task,
                 (const char *)"usbd",
                 (uint16_t)LED_STK_SIZE,
                 (void *)NULL,
                 (UBaseType_t)LED_TASK_PRIO,
-                (TaskHandle_t *)&USBTask_Handler);
+                (TaskHandle_t *)&USB_Task_Handler);
 
     xTaskCreate((TaskFunction_t)led_task,
-                (const char *)"task1",
-                (uint16_t)LED_STK_SIZE,
+                (const char *)"led",
+                (uint16_t)256,
                 (void *)NULL,
                 (UBaseType_t)LED_TASK_PRIO,
                 (TaskHandle_t *)&LED_Task_Handler);
-
-    xTaskCreate((TaskFunction_t)state_task,
-                (const char *)"state",
-                (uint16_t)LED_STK_SIZE,
-                (void *)NULL,
-                (UBaseType_t)LED_TASK_PRIO,
-                (TaskHandle_t *)&STATE_Task_Handler);
 
     vTaskStartScheduler();
 
