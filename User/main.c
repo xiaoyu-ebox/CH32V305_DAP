@@ -325,25 +325,19 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 // 发送
 void cdc_2_uart_func(void *param)
 {
-    uint8_t ucRxData[TX_BUFF_SZ];
-
     while (1)
     {
-        size_t xReceivedBytes = xMessageBufferReceive(cdc_2_uart_queue, (void *)ucRxData, sizeof(ucRxData), portMAX_DELAY);
+        uint8_t *ucRxData = VCOM_Get_Send_Idle_Buffer();
+
+        size_t xReceivedBytes = xMessageBufferReceive(cdc_2_uart_queue, (void *)ucRxData, TX_BUFF_SZ, portMAX_DELAY);
         if (xReceivedBytes > 0)
         {
-            // for (uint32_t i = 0; i < 1500; ++i)
-            // {
-            //     if (DMA_GetCurrDataCounter(DMA1_Channel2) == 0)
-            //     {
-            //         break;
-            //     }
-
-            //     vTaskDelay(pdMS_TO_TICKS(2));
-            // }
-            VCOM_Send_DMA(ucRxData, xReceivedBytes);
-
-            c2u_send_bytes += xReceivedBytes;
+            uint32_t wr = VCOM_Send_DMA(ucRxData, xReceivedBytes);
+            if (wr != xReceivedBytes)
+            {
+                printf("c2u w drop %u - %u\n", xReceivedBytes, wr);
+            }
+            c2u_send_bytes += wr;
         }
     }
 }
@@ -352,7 +346,7 @@ void cdc_2_uart_func(void *param)
 void tud_cdc_rx_cb(uint8_t itf)
 {
     uint32_t len = 0;
-    uint8_t data[256];
+    uint8_t data[TX_BUFF_SZ];
 
     while ((len = tud_cdc_read(data, sizeof(data))) > 0)
     {
@@ -372,7 +366,7 @@ void uart_2_cdc_func(void *param)
 {
     if (tud_cdc_connected())
     {
-        uint8_t ucRxData[256];
+        uint8_t ucRxData[RX_BUFF_SZ];
         size_t xReceivedBytes = xMessageBufferReceive(uart_2_cdc_queue, (void *)ucRxData, sizeof(ucRxData), 0);
         if (xReceivedBytes > 0)
         {
@@ -450,7 +444,7 @@ void tusb_task(void *pvParameters)
     xClearBufTimer = xTimerCreate("CLK_DAP", pdMS_TO_TICKS(1000 * 10), pdTRUE, (void *)0, dapBuf_ClearTimer);
 #endif
 
-    xStateTimer = xTimerCreate("STATE", pdMS_TO_TICKS(2000), pdTRUE, (void *)1, stateTimerHandle);
+    xStateTimer = xTimerCreate("STATE", pdMS_TO_TICKS(4000), pdTRUE, (void *)1, stateTimerHandle);
     xTimerStart(xStateTimer, 0);
 
     xTaskCreate((TaskFunction_t)cdc_2_uart_func,
@@ -491,7 +485,7 @@ int main(void)
     printf("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
     printf("FreeRTOS Kernel Version:%s\r\n", tskKERNEL_VERSION_NUMBER);
 
-    GPIO_Toggle_INIT();
+    // GPIO_Toggle_INIT();
 
     // 防止复位太快，上位机未检测到usb拔出了，导致不会再次设置串口
     Delay_Ms(1000);
@@ -504,12 +498,12 @@ int main(void)
                 (UBaseType_t)LED_TASK_PRIO,
                 (TaskHandle_t *)&USB_Task_Handler);
 
-    xTaskCreate((TaskFunction_t)led_task,
-                (const char *)"led",
-                (uint16_t)256,
-                (void *)NULL,
-                (UBaseType_t)LED_TASK_PRIO,
-                (TaskHandle_t *)&LED_Task_Handler);
+    // xTaskCreate((TaskFunction_t)led_task,
+    //             (const char *)"led",
+    //             (uint16_t)256,
+    //             (void *)NULL,
+    //             (UBaseType_t)LED_TASK_PRIO,
+    //             (TaskHandle_t *)&LED_Task_Handler);
 
     vTaskStartScheduler();
 

@@ -7,41 +7,44 @@
 #include "message_buffer.h"
 
 uint8_t RxBuffer[RX_BUFF_SZ] __attribute__((aligned(4)));
+uint8_t RxBuffer2[RX_BUFF_SZ] __attribute__((aligned(4)));
 uint8_t TxBuffer[TX_BUFF_SZ] __attribute__((aligned(4)));
+uint8_t TxBuffer2[TX_BUFF_SZ] __attribute__((aligned(4)));
 
 DMA_Channel_TypeDef *uartTxDma = DMA1_Channel2;     // 发送dma
 DMA_Channel_TypeDef *uartRxDma = DMA1_Channel3;     // 接收dma
 SemaphoreHandle_t xSemaphore = NULL;
 
 extern void vcom_uart_rx_cb(uint8_t *data, uint16_t len);
+
 void USART3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void DMA1_Channel2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void DMA1_Channel3_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 
-uint8_t tempBuf[sizeof(RxBuffer)];
 void USART3_IRQHandler(void)
 {
     if (USART_GetITStatus(USART3, USART_IT_IDLE) != RESET)
     {
         USART_ReceiveData(USART3); // 清除空闲中断标志（关键！）
 
-        // 重置DMA（循环模式下自动覆盖旧数据）
-        DMA_Cmd(uartRxDma, DISABLE);
+        // 禁止dma
+        uartRxDma->CFGR &= (uint16_t)(~DMA_CFGR1_EN);
 
         // 计算已接收数据长度
         uint16_t remain_cnt = DMA_GetCurrDataCounter(uartRxDma); // 剩余未传输的数据量
         uint16_t received_len = sizeof(RxBuffer) - remain_cnt;   // 已接收的数据长度
+
+        uint8_t *currRxBuffer = (uint8_t *)uartRxDma->MADDR;
+        uartRxDma->MADDR = (currRxBuffer == RxBuffer) ? (uint32_t)RxBuffer2 : (uint32_t)RxBuffer;
+
+        // 重置DMA
+        uartRxDma->CNTR = sizeof(RxBuffer);
+        uartRxDma->CFGR |= DMA_CFGR1_EN;
+
         if (received_len)
         {
-            memcpy(tempBuf, RxBuffer, sizeof(RxBuffer));
-        }
-
-        DMA_SetCurrDataCounter(uartRxDma, sizeof(RxBuffer));
-        DMA_Cmd(uartRxDma, ENABLE);
-
-        if (received_len)
-        {
-            vcom_uart_rx_cb(tempBuf, received_len);
+            // 数据处理
+            vcom_uart_rx_cb(currRxBuffer, received_len);
         }        
     }
 }
@@ -51,18 +54,21 @@ void DMA1_Channel3_IRQHandler(void)
 {
     if (DMA_GetITStatus(DMA1_IT_TC3))
     {
-        DMA_Cmd(uartRxDma, DISABLE);
+        // 禁止dma
+        uartRxDma->CFGR &= (uint16_t)(~DMA_CFGR1_EN);
 
         // 处理接收完成的数据
-        memcpy(tempBuf, RxBuffer, sizeof(RxBuffer));
+        uint8_t *currRxBuffer = (uint8_t *)uartRxDma->MADDR;
+        uartRxDma->MADDR = (currRxBuffer == RxBuffer) ? (uint32_t)RxBuffer2 : (uint32_t)RxBuffer;
 
-        // 重置DMA（循环模式下自动覆盖旧数据）
-        DMA_SetCurrDataCounter(uartRxDma, sizeof(RxBuffer));
-        DMA_Cmd(uartRxDma, ENABLE);
+        // 重置DMA
+        uartRxDma->CNTR = sizeof(RxBuffer);
+        uartRxDma->CFGR |= DMA_CFGR1_EN;
 
         DMA_ClearITPendingBit(DMA1_IT_TC3);
 
-        vcom_uart_rx_cb(tempBuf, sizeof(tempBuf));
+        // 数据处理
+        vcom_uart_rx_cb(currRxBuffer, sizeof(RxBuffer));
     }
 }
 
@@ -79,22 +85,33 @@ void DMA1_Channel2_IRQHandler(void)
     }
 }
 
-void VCOM_Send_DMA(uint8_t *data, uint16_t len)
+uint32_t VCOM_Send_DMA(uint8_t *data, uint16_t len)
 {
-    if (xSemaphoreTake(xSemaphore, pdMS_TO_TICKS(5000)) != pdPASS)
-    {
-        printf("Uart send fail\n");
-    }
-
-    DMA_Cmd(uartTxDma, DISABLE); // 关闭DMA
     if (len > TX_BUFF_SZ)
         len = TX_BUFF_SZ;
 
-    memcpy(TxBuffer, data, len);
-    DMA_SetCurrDataCounter(uartTxDma, len); // 设置传输长度
-    DMA_Cmd(uartTxDma, ENABLE);             // 启动DMA
+    if (xSemaphoreTake(xSemaphore, pdMS_TO_TICKS(5000)) != pdPASS)
+    {
+        return 0;
+    }
+
+    // 禁止dma
+    uartTxDma->CFGR &= (uint16_t)(~DMA_CFGR1_EN);
+
+    // 更新buf指针
+    uartTxDma->MADDR = (uint32_t)data;
+
+    // 重置DMA
+    uartTxDma->CNTR = len;
+    uartTxDma->CFGR |= DMA_CFGR1_EN;
+
+    return len;
 }
 
+uint8_t *VCOM_Get_Send_Idle_Buffer(void)
+{
+    return ((uint8_t *)(uartTxDma->MADDR) == TxBuffer) ? TxBuffer2 : TxBuffer;
+}
 
 void VCOM_Init(void)
 {
