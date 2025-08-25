@@ -350,7 +350,7 @@ void tud_cdc_rx_cb(uint8_t itf)
 
     while ((len = tud_cdc_read(data, sizeof(data))) > 0)
     {
-        size_t xBytesSent = xMessageBufferSend(cdc_2_uart_queue, (void *)data, len, 0);
+        size_t xBytesSent = xMessageBufferSend(cdc_2_uart_queue, (void *)data, len, 2000);
         c2u_recv_bytes += xBytesSent;
 
         if (xBytesSent != len)
