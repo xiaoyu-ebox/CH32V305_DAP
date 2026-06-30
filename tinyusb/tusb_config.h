@@ -111,7 +111,7 @@
 #endif
 
 #if CFG_TUD_VENDOR
-#define OPT_CMSIS_DAPV2 1
+#define OPT_CMSIS_DAPV2 0
 #endif
 
 // CDC FIFO size of TX and RX

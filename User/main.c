@@ -98,6 +98,7 @@ void echo_all(const uint8_t buf[], uint32_t count)
     }
 }
 
+#if OPT_CMSIS_DAPV2
 #define LOG_DAP(str) // echo_all(str,strlen(str))
 #define CFG_DAP_RCV_BUFSIZE (512 * 2 * 2)
 
@@ -197,6 +198,7 @@ void dump_memory(uint8_t *pbuff, uint32_t buff_size, int col)
     }
     printf("\r\n");
 }
+#endif
 
 #if OPT_CMSIS_DAPV2
 
@@ -342,16 +344,20 @@ void cdc_2_uart_func(void *param)
     }
 }
 
+#define CDC_RX_BUFF_SZ 512
+#define CDC_TX_BUFF_SZ 512
+uint8_t cdc_rx_buf[CDC_RX_BUFF_SZ];
+uint8_t cdc_tx_buf[CDC_TX_BUFF_SZ];
+
 // 接收
 void tud_cdc_rx_cb(uint8_t itf)
 {
     uint32_t len = 0;
-    uint8_t data[TX_BUFF_SZ];
 
-    while ((len = tud_cdc_read(data, sizeof(data))) > 0)
+    while ((len = tud_cdc_read(cdc_rx_buf, sizeof(cdc_rx_buf))) > 0)
     {
-        size_t xBytesSent = xMessageBufferSend(cdc_2_uart_queue, (void *)data, len, 0);
-        c2u_recv_bytes += xBytesSent;
+        size_t xBytesSent = xMessageBufferSend(cdc_2_uart_queue, (void *)cdc_rx_buf, len, 0);
+        c2u_recv_bytes += len;
 
         if (xBytesSent != len)
         {
@@ -366,11 +372,10 @@ void uart_2_cdc_func(void *param)
 {
     if (tud_cdc_connected())
     {
-        uint8_t ucRxData[RX_BUFF_SZ];
-        size_t xReceivedBytes = xMessageBufferReceive(uart_2_cdc_queue, (void *)ucRxData, sizeof(ucRxData), 0);
+        size_t xReceivedBytes = xMessageBufferReceive(uart_2_cdc_queue, (void *)cdc_tx_buf, sizeof(cdc_tx_buf), 0);
         if (xReceivedBytes > 0)
         {
-            int wr = tud_cdc_write((const void *)ucRxData, xReceivedBytes);
+            int wr = tud_cdc_write((const void *)cdc_tx_buf, xReceivedBytes);
             if (wr != xReceivedBytes)
             {
                 printf("u2c w drop %u - %u\n", xReceivedBytes, wr);
@@ -389,7 +394,7 @@ void vcom_uart_rx_cb(uint8_t *data, uint16_t len)
     {
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
         size_t xBytesSent = xMessageBufferSendFromISR(uart_2_cdc_queue, (void *)data, len, &xHigherPriorityTaskWoken);
-        u2c_recv_bytes += xBytesSent;
+        u2c_recv_bytes += len;
 
         if (xBytesSent != len)
         {
@@ -437,8 +442,8 @@ void tusb_task(void *pvParameters)
     tusb_rhport_init_t dev_init = {.role = TUSB_ROLE_DEVICE, .speed = TUSB_SPEED_HIGH};
     tusb_init(BOARD_TUD_RHPORT, &dev_init);
 
-    uart_2_cdc_queue = xMessageBufferCreate(1024 * 1);
-    cdc_2_uart_queue = xMessageBufferCreate(1024 * 1);
+    uart_2_cdc_queue = xMessageBufferCreate(4096 * 1);
+    cdc_2_uart_queue = xMessageBufferCreate(4096 * 1);
 
 #if OPT_CMSIS_DAPV2
     xClearBufTimer = xTimerCreate("CLK_DAP", pdMS_TO_TICKS(1000 * 10), pdTRUE, (void *)0, dapBuf_ClearTimer);
