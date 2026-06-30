@@ -370,19 +370,29 @@ void tud_cdc_rx_cb(uint8_t itf)
 // 发送
 void uart_2_cdc_func(void *param)
 {
-    if (tud_cdc_connected())
+    if (!tud_cdc_connected())
     {
-        size_t xReceivedBytes = xMessageBufferReceive(uart_2_cdc_queue, (void *)cdc_tx_buf, sizeof(cdc_tx_buf), 0);
-        if (xReceivedBytes > 0)
-        {
-            int wr = tud_cdc_write((const void *)cdc_tx_buf, xReceivedBytes);
-            if (wr != xReceivedBytes)
-            {
-                printf("u2c w drop %u - %u\n", xReceivedBytes, wr);
-            }
-            tud_cdc_write_flush();
+        return;
+    }
 
-            u2c_send_bytes += wr;
+    // 循环处理所有消息，避免事件队列满导致数据丢失
+    size_t xReceivedBytes;
+    while ((xReceivedBytes = xMessageBufferReceive(uart_2_cdc_queue, (void *)cdc_tx_buf, sizeof(cdc_tx_buf), 0)) > 0)
+    {
+        // tud_cdc_write 可能只写入部分数据（tx_ff 满），
+        // 写入的数据会在 cdcd_xfer_cb 中自动 flush
+        int wr = tud_cdc_write((const void *)cdc_tx_buf, xReceivedBytes);
+        if (wr > 0)
+        {
+            tud_cdc_write_flush();
+        }
+
+        // 记录实际写入 tx_ff 的字节数
+        u2c_send_bytes += wr;
+        if ((size_t)wr != xReceivedBytes)
+        {
+            u2c_drop_bytes += (xReceivedBytes - wr);
+            printf("u2c w drop %u - %u\n", xReceivedBytes, wr);
         }
     }
 }

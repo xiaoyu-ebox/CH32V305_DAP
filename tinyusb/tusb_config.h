@@ -116,7 +116,11 @@
 
 // CDC FIFO size of TX and RX
 #define CFG_TUD_CDC_RX_BUFSIZE    (TUD_OPT_HIGH_SPEED ? 512 : 64)
-#define CFG_TUD_CDC_TX_BUFSIZE    (TUD_OPT_HIGH_SPEED ? 512 : 64)
+#define CFG_TUD_CDC_TX_BUFSIZE    (TUD_OPT_HIGH_SPEED ? 2048 : 64)
+#define CFG_TUD_CDC_EP_BUFSIZE    (TUD_OPT_HIGH_SPEED ? 512 : 64)
+
+// Increase task queue size to prevent event loss under high UART throughput
+#define CFG_TUD_TASK_QUEUE_SZ     32
 
 // Vendor FIFO size of TX and RX
 // If zero: vendor endpoints will not be buffered
